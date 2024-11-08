@@ -54,13 +54,25 @@ class User(db.Model):
 
 @app.route('/', methods=['GET', 'POST'])
 def analyze_code():
+    if request.method == 'GET':
+        return render_template('analyze.html')
+    
     if request.method == 'POST':
+        if 'user_id' in session:
+            user = User.query.get(session['user_id'])
+
         code_snippet = request.form['code']
+        corporate_rules = request.form.get('rules', '')  # Obtener las reglas corporativas del formulario
+
+        # Construir el mensaje del sistema con o sin las reglas corporativas
+        system_message = "You are a code analysis assistant. Analyze the following code for potential improvements or bugs."
+        if corporate_rules.strip():
+            system_message += f" Follow these corporate rules or standards: {corporate_rules.strip()}"
 
         messages = [
             {
                 "role": "system",
-                "content": "You are a code analysis assistant. Analyze the following code for potential improvements or bugs."
+                "content": system_message
             },
             {
                 "role": "user",
@@ -69,18 +81,22 @@ def analyze_code():
         ]
 
         try:
-            response = openai.chat.completions.create(
-                model="gpt-4o", 
+            response = openai.ChatCompletion.create(
+                model="gpt-4", 
                 messages=messages,
                 max_tokens=500,
                 temperature=0.5,
             )
+            
             analysis = response.choices[0].message.content.strip()
+            new_prompt = Prompts(user_id=user.id, prompt=code_snippet, response=analysis)
+            db.session.add(new_prompt)
+            db.session.commit()
+            return render_template('result.html', code=code_snippet, analysis=analysis)
+        
         except Exception as e:
-            analysis = f"An error occurred: {e}"
-
-        return render_template('result.html', code=code_snippet, analysis=analysis)
-    return render_template('index.html')
+            db.session.rollback()
+            abort(400, message={"error": str(e)})
 
 # CRUD routes
 @app.route('/users', methods=['POST'])
